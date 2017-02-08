@@ -7,15 +7,16 @@
  */
 package edu.illinois.cs.cogcomp.pos;
 
+import edu.illinois.cs.cogcomp.lbjava.classify.TestDiscrete;
 import edu.illinois.cs.cogcomp.lbjava.nlp.seg.POSBracketToToken;
+import edu.illinois.cs.cogcomp.lbjava.nlp.seg.Token;
 import edu.illinois.cs.cogcomp.lbjava.parse.Parser;
 import edu.illinois.cs.cogcomp.pos.lbjava.*;
 import edu.illinois.cs.cogcomp.core.utilities.configuration.ResourceManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 
 /**
  * Simple class to build and train models from existing training data, as opposed to using the
@@ -104,46 +105,115 @@ public class POSTrain {
         POSTaggerUnknown.isTraining = true;
         POSTaggerKnown.isTraining = true;
 
-        // Run the learner
-        for (int i = 0; i < iter; i++) {
-            System.out.println("Training round " + i);
-            while ((ex = trainingParser.next()) != null) {
-                taggerKnown.learn(ex);
+        Parser testDataParser = new POSBracketToToken(rm.getString("testData"));
+
+        String accPath = rm.getString("modelPath") + "accuracyPerIteration.txt";
+        try(FileWriter fw = new FileWriter(accPath, true);
+            BufferedWriter bw = new BufferedWriter(fw);
+            PrintWriter out = new PrintWriter(bw))
+        {
+            // Run the learner
+            for (int i = 0; i < iter; i++) {
+                System.out.println("Training round " + i);
+                while ((ex = trainingParser.next()) != null) {
+                    taggerKnown.learn(ex);
+                }
+                System.out.println("\tFinished training " + rm.getString("knownName"));
+                while ((ex = trainingParserUnknown.next()) != null) {
+                    taggerUnknown.learn(ex);
+                }
+                System.out.println("\tFinished training " + rm.getString("unknownName"));
+                trainingParser.reset();
+                trainingParserUnknown.reset();
+                taggerKnown.doneWithRound();
+                taggerUnknown.doneWithRound();
+
+                double accuracy = evaluate(testDataParser);
+                System.out.printf("\tThe Accuracy after this round is %f\n",accuracy);
+                out.println(accuracy);
+                testDataParser.reset();
             }
-            System.out.println("\tFinished training " + rm.getString("knownName"));
-            while ((ex = trainingParserUnknown.next()) != null) {
-                taggerUnknown.learn(ex);
-            }
-            System.out.println("\tFinished training " + rm.getString("unknownName"));
-            trainingParser.reset();
-            trainingParserUnknown.reset();
-            taggerKnown.doneWithRound();
-            taggerUnknown.doneWithRound();
+            taggerUnknown.doneLearning();
+            taggerKnown.doneLearning();
         }
-        taggerUnknown.doneLearning();
-        taggerKnown.doneLearning();
+        catch (IOException e)
+        {
+            logger.warn("Failed to record accuracy into the output file!");
+            e.printStackTrace();
+        }
+
+
     }
 
     /**
      * Saves the ".lc" and ".lex" models to disk in the modelPath specified by the constructor
      */
-    private void writeModelsToDisk() {
+    public void writeModelsToDisk() {
         baselineTarget.save();
         mikheevTable.save();
         taggerKnown.save();
         taggerUnknown.save();
         logger.info("Done training, wrote models to disk.");
     }
+    /**
+     * evaluate model against test set
+     */
+    private double evaluate(Parser labeledTestParser) {
+        int numSeen = 0;
+        int numEqual = 0;
+        Token labeledWord = null;
+        try{
+            labeledWord = (Token) labeledTestParser.next();
+        }
+        catch (Exception e){System.out.print("POSTrain.evaluate: Failed to Load parser from argument. ");}
+
+        String labeledTag = null;
+        String testTag = null;
+        for (; labeledWord != null; labeledWord = (Token) labeledTestParser.next()) {
+
+            labeledTag = labeledWord.label;
+            testTag = taggerKnown.discreteValue(labeledWord);
+
+            if (labeledTag.equals(testTag)) {
+                numEqual++;
+            }
+            numSeen++;
+        }
+        return (double) numEqual / (double) numSeen;
+    }
 
     public static void main(String[] args) throws Exception{
         POSTrain trainer;
+        int iter = 50;
+
         if(args.length > 0) {
             System.out.printf("Use config file : %s\n", args[0]);
-            trainer = new POSTrain(50, args[0]);
+
+            if (args.length > 1) iter = Integer.parseInt(args[1]);
+            else iter = 50;
+
+            if (iter > 200) iter = 200;
+            if (iter < 0) iter = 50;
+
+            trainer = new POSTrain(iter, args[0]);
         }
         else
+        {
             trainer = new POSTrain(50);
+        }
+
+        long startTime = System.currentTimeMillis();
+
+
+
         trainer.trainModels();
+
+        float timeElapsed = (float) (System.currentTimeMillis() - startTime) / 1000;
+        System.out.printf("Training Completed in %2f seconds.\n", timeElapsed);
+        System.out.printf("Average Training Time per Iteration is %2f seconds.\n", timeElapsed/iter);
+
         trainer.writeModelsToDisk();
+
+
     }
 }
