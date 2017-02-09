@@ -107,7 +107,7 @@ public class POSTrain {
 
         Parser testDataParser = new POSBracketToToken(rm.getString("testData"));
 
-        String accPath = rm.getString("modelPath") + "accuracyPerIteration.txt";
+        String accPath = rm.getString("modelPath") + "TestAccuracy.txt";
         try(FileWriter fw = new FileWriter(accPath, true);
             BufferedWriter bw = new BufferedWriter(fw);
             PrintWriter out = new PrintWriter(bw))
@@ -141,8 +141,10 @@ public class POSTrain {
             logger.warn("Failed to record accuracy into the output file!");
             e.printStackTrace();
         }
-
-
+        TestDiscrete.testDiscrete(new TestDiscrete(), taggerKnown, new POSLabel(),
+                new POSBracketToToken(rm.getString("testData")), true, 0);
+        TestDiscrete.testDiscrete(new TestDiscrete(), taggerKnown, new POSLabel(),
+                new POSBracketToToken(rm.getString("trainingData")), true, 0);
     }
 
     /**
